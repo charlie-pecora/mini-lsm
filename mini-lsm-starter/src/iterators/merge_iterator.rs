@@ -102,47 +102,29 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
 
     fn next(&mut self) -> Result<()> {
         let mut result = Ok(());
+        let prev_key = self.key().to_key_vec();
         loop {
-            match self.iters.pop() {
-                Some(mut iter) => {
-                    if iter.1.is_valid() {
-                        let mut should_push = true;
-                        if iter.1.key() <= self.key() {
-                            let next_result = iter.1.next();
-                            match next_result {
-                                Ok(()) => {}
-                                Err(e) => {
-                                    should_push = false;
-                                    result = Err(e);
-                                }
+            let current = self.current.take();
+            if let Some(mut c) = current {
+                if c.1.is_valid() {
+                    let next_result = c.1.next();
+                    match next_result {
+                        Ok(()) => {
+                            if c.1.is_valid() {
+                                self.iters.push(c);
                             }
-                        } else {
-                            break;
                         }
-                        if should_push {
-                            self.iters.push(iter);
+                        Err(e) => {
+                            result = Err(e);
                         }
                     }
                 }
-                None => break,
+            }
+            self.current = self.iters.pop();
+            if self.key() != prev_key.as_key_slice() {
+                break;
             }
         }
-        if let Some(ref mut c) = self.current {
-            if c.1.is_valid() {
-                let next_result = c.1.next();
-                match next_result {
-                    Ok(()) => {}
-                    Err(e) => {
-                        result = Err(e);
-                    }
-                }
-            }
-        }
-        let current = self.current.take();
-        if let Some(c) = current {
-            self.iters.push(c);
-        }
-        self.current = self.iters.pop();
         result
     }
 }
