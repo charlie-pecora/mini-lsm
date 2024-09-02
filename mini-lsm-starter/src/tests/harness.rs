@@ -94,6 +94,7 @@ where
     I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
 {
     for (k, v) in expected {
+        println!("{:?} {:?}", k, v);
         assert!(iter.is_valid());
         assert_eq!(
             k,
@@ -173,7 +174,7 @@ where
 pub fn expect_iter_error(mut iter: impl StorageIterator) {
     loop {
         match iter.next() {
-            Ok(_) if iter.is_valid() => continue,
+            Ok(v) if iter.is_valid() => println!("{:?}", v),
             Ok(_) => panic!("expect an error"),
             Err(_) => break,
         }
