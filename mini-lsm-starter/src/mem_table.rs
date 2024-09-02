@@ -26,7 +26,7 @@ use crossbeam_skiplist::SkipMap;
 use ouroboros::self_referencing;
 
 use crate::iterators::StorageIterator;
-use crate::key::KeySlice;
+use crate::key::{Key, KeySlice};
 use crate::table::SsTableBuilder;
 use crate::wal::Wal;
 
@@ -107,6 +107,10 @@ impl MemTable {
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
         let key = bytes::Bytes::copy_from_slice(_key);
         let value = bytes::Bytes::copy_from_slice(_value);
+        self.approximate_size.fetch_add(
+            key.len() + value.len(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         self.map.insert(key, value);
         return Ok(());
     }
@@ -124,8 +128,15 @@ impl MemTable {
     }
 
     /// Get an iterator over a range of keys.
-    pub fn scan(&self, _lower: Bound<&[u8]>, _upper: Bound<&[u8]>) -> MemTableIterator {
-        unimplemented!()
+    pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
+        let mut iter = MemTableIteratorBuilder {
+            map: self.map.clone(),
+            iter_builder: |map| map.range((map_bound(lower), map_bound(upper))),
+            item: (Bytes::new(), Bytes::new()),
+        }
+        .build();
+        let _ = iter.next();
+        iter
     }
 
     /// Flush the mem-table to SSTable. Implement in week 1 day 6.
@@ -171,18 +182,25 @@ impl StorageIterator for MemTableIterator {
     type KeyType<'a> = KeySlice<'a>;
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        let (_key, _value) = self.borrow_item();
+        _value
     }
 
     fn key(&self) -> KeySlice {
-        unimplemented!()
+        let (_key, _value) = self.borrow_item();
+        Key::from_slice(_key)
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        !self.borrow_item().0.is_empty()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        let entry = self.with_iter_mut(|iter| match iter.next() {
+            Some(v) => (v.key().clone(), v.value().clone()),
+            None => (Bytes::from_static(&[]), Bytes::from_static(&[])),
+        });
+        self.with_mut(|x| *x.item = entry);
+        return Ok(());
     }
 }

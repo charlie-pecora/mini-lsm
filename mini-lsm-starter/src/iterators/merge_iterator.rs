@@ -20,7 +20,7 @@ use std::collections::BinaryHeap;
 
 use anyhow::Result;
 
-use crate::key::KeySlice;
+use crate::key::{Key, KeySlice};
 
 use super::StorageIterator;
 
@@ -59,7 +59,18 @@ pub struct MergeIterator<I: StorageIterator> {
 
 impl<I: StorageIterator> MergeIterator<I> {
     pub fn create(iters: Vec<Box<I>>) -> Self {
-        unimplemented!()
+        let mut heap = BinaryHeap::<HeapWrapper<I>>::new();
+        for (i, iter) in iters.into_iter().enumerate() {
+            if iter.is_valid() {
+                heap.push(HeapWrapper(i, iter))
+            }
+        }
+        let current = heap.pop();
+        let it = Self {
+            iters: heap,
+            current,
+        };
+        it
     }
 }
 
@@ -69,18 +80,69 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     type KeyType<'a> = KeySlice<'a>;
 
     fn key(&self) -> KeySlice {
-        unimplemented!()
+        match &self.current {
+            Some(v) => v.1.key(),
+            None => Key::from_slice(&[]),
+        }
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        match &self.current {
+            Some(v) => v.1.value(),
+            None => &[],
+        }
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        match &self.current {
+            Some(v) => v.1.is_valid(),
+            None => false,
+        }
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        let mut result = Ok(());
+        loop {
+            match self.iters.pop() {
+                Some(mut iter) => {
+                    if iter.1.is_valid() {
+                        let mut should_push = true;
+                        if iter.1.key() <= self.key() {
+                            let next_result = iter.1.next();
+                            match next_result {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    should_push = false;
+                                    result = Err(e);
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                        if should_push {
+                            self.iters.push(iter);
+                        }
+                    }
+                }
+                None => break,
+            }
+        }
+        if let Some(ref mut c) = self.current {
+            if c.1.is_valid() {
+                let next_result = c.1.next();
+                match next_result {
+                    Ok(()) => {}
+                    Err(e) => {
+                        result = Err(e);
+                    }
+                }
+            }
+        }
+        let current = self.current.take();
+        if let Some(c) = current {
+            self.iters.push(c);
+        }
+        self.current = self.iters.pop();
+        result
     }
 }
