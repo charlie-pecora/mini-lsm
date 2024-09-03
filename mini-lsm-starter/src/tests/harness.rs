@@ -94,7 +94,6 @@ where
     I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
 {
     for (k, v) in expected {
-        println!("{:?} {:?}", k, v);
         assert!(iter.is_valid());
         assert_eq!(
             k,
@@ -151,6 +150,11 @@ where
     I: for<'a> StorageIterator<KeyType<'a> = &'a [u8]>,
 {
     for (k, v) in expected {
+        println!(
+            "{} {}",
+            String::from_utf8(iter.key().to_vec()).unwrap(),
+            String::from_utf8(iter.value().to_vec()).unwrap()
+        );
         assert!(iter.is_valid());
         assert_eq!(
             k,
