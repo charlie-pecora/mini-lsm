@@ -425,5 +425,5 @@ fn check_tombstone(v: Bytes) -> Option<Bytes> {
     if v.len() == 0 {
         return None;
     }
-    return Some(v);
+    Some(v)
 }
