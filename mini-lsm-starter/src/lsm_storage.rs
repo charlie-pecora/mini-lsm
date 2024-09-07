@@ -422,7 +422,7 @@ impl LsmStorageInner {
 
 // empty byte array is used as the tombstone, so return None if this value is found
 fn check_tombstone(v: Bytes) -> Option<Bytes> {
-    if v.len() == 0 {
+    if v.is_empty() {
         return None;
     }
     Some(v)

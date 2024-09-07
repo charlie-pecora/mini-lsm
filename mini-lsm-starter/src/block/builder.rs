@@ -59,7 +59,7 @@ impl BlockBuilder {
         if self.offsets.len() == 1 {
             return true;
         }
-        self.data.len() < self.block_size.try_into().unwrap()
+        self.data.len() < self.block_size
     }
 
     /// Check if there is no key-value pair in the block.

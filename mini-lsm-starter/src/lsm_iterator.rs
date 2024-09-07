@@ -37,11 +37,11 @@ impl LsmIterator {
         if it.key_is_deleted() {
             it.next()?;
         }
-        return Ok(it);
+        Ok(it)
     }
 
     fn key_is_deleted(&self) -> bool {
-        self.key().len() > 0 && self.value().len() == 0
+        !self.key().is_empty() && self.value().is_empty()
     }
 }
 
@@ -95,7 +95,7 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
 
     fn is_valid(&self) -> bool {
         if self.has_errored {
-            return false;
+            false
         } else {
             self.iter.is_valid()
         }

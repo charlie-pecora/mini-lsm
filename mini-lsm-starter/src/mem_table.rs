@@ -92,11 +92,7 @@ impl MemTable {
 
     /// Get a value by key.
     pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
-        if let Some(v) = self.map.get(_key) {
-            Some(v.value().clone())
-        } else {
-            None
-        }
+        self.map.get(_key).map(|v| v.value().clone())
     }
 
     /// Put a key-value pair into the mem-table.

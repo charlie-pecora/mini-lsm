@@ -15,7 +15,7 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{borrow::Borrow, sync::Arc};
+use std::sync::Arc;
 
 use crate::key::{Key, KeySlice, KeyVec};
 
@@ -103,8 +103,7 @@ impl BlockIterator {
             .offsets
             .clone()
             .into_iter()
-            .filter(|x| x >= &&end_of_current)
-            .next()
+            .find(|x| x >= &end_of_current)
         {
             Some(v) => {
                 let offset = v as usize;
