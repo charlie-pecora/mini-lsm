@@ -96,6 +96,7 @@ fn test_block_iterator() {
         for i in 0..num_of_keys() {
             let key = iter.key();
             let value = iter.value();
+            println!("{} {:?} {:?}", i, key, value);
             assert_eq!(
                 key.for_testing_key_ref(),
                 key_of(i).for_testing_key_ref(),
