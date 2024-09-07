@@ -150,11 +150,6 @@ where
     I: for<'a> StorageIterator<KeyType<'a> = &'a [u8]>,
 {
     for (k, v) in expected {
-        println!(
-            "{} {}",
-            String::from_utf8(iter.key().to_vec()).unwrap(),
-            String::from_utf8(iter.value().to_vec()).unwrap()
-        );
         assert!(iter.is_valid());
         assert_eq!(
             k,
@@ -178,7 +173,7 @@ where
 pub fn expect_iter_error(mut iter: impl StorageIterator) {
     loop {
         match iter.next() {
-            Ok(v) if iter.is_valid() => println!("{:?}", v),
+            Ok(_) if iter.is_valid() => continue,
             Ok(_) => panic!("expect an error"),
             Err(_) => break,
         }
