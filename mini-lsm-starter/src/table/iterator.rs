@@ -32,7 +32,7 @@ pub struct SsTableIterator {
 impl SsTableIterator {
     /// Create a new iterator and seek to the first key-value pair in the first data block.
     pub fn create_and_seek_to_first(table: Arc<SsTable>) -> Result<Self> {
-        let block = table.read_block(0)?;
+        let block = table.read_block_cached(0)?;
         let block_iter = BlockIterator::create_and_seek_to_first(block);
         Ok(Self {
             table,
@@ -43,7 +43,7 @@ impl SsTableIterator {
 
     /// Seek to the first key-value pair in the first data block.
     pub fn seek_to_first(&mut self) -> Result<()> {
-        let block = self.table.read_block(0)?;
+        let block = self.table.read_block_cached(0)?;
         self.blk_iter = BlockIterator::create_and_seek_to_first(block);
         self.blk_idx = 0;
         Ok(())
@@ -65,12 +65,12 @@ impl SsTableIterator {
             println!("{:?} {:?}", meta.first_key, meta.last_key);
             if key >= meta.first_key.as_key_slice() && key <= meta.last_key.as_key_slice() {
                 println!("found match!");
-                let block = self.table.read_block(i)?;
+                let block = self.table.read_block_cached(i)?;
                 self.blk_iter = BlockIterator::create_and_seek_to_key(block, key);
                 self.blk_idx = i;
                 return Ok(());
             } else if key < meta.first_key.as_key_slice() {
-                let block = self.table.read_block(i)?;
+                let block = self.table.read_block_cached(i)?;
                 self.blk_iter = BlockIterator::create_and_seek_to_first(block);
                 self.blk_idx = i;
                 return Ok(());
@@ -104,7 +104,7 @@ impl StorageIterator for SsTableIterator {
         self.blk_iter.next();
         if !self.is_valid() {
             self.blk_idx += 1;
-            match self.table.read_block(self.blk_idx) {
+            match self.table.read_block_cached(self.blk_idx) {
                 Ok(block) => self.blk_iter = BlockIterator::create_and_seek_to_first(block),
                 Err(e) => {}
             }
