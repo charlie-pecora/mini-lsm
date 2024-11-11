@@ -15,13 +15,17 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::path::Path;
 use std::sync::Arc;
+use std::{mem::replace, path::Path};
 
 use anyhow::Result;
 
-use super::{BlockMeta, SsTable};
-use crate::{block::BlockBuilder, key::KeySlice, lsm_storage::BlockCache};
+use super::{BlockMeta, FileObject, SsTable};
+use crate::{
+    block::BlockBuilder,
+    key::{Key, KeySlice},
+    lsm_storage::BlockCache,
+};
 
 /// Builds an SSTable from key-value pairs.
 pub struct SsTableBuilder {
@@ -36,7 +40,14 @@ pub struct SsTableBuilder {
 impl SsTableBuilder {
     /// Create a builder based on target block size.
     pub fn new(block_size: usize) -> Self {
-        unimplemented!()
+        SsTableBuilder {
+            builder: BlockBuilder::new(block_size),
+            first_key: Vec::<u8>::new(),
+            last_key: Vec::<u8>::new(),
+            data: Vec::<u8>::new(),
+            meta: Vec::<BlockMeta>::new(),
+            block_size,
+        }
     }
 
     /// Adds a key-value pair to SSTable.
@@ -44,15 +55,33 @@ impl SsTableBuilder {
     /// Note: You should split a new block when the current block is full.(`std::mem::replace` may
     /// be helpful here)
     pub fn add(&mut self, key: KeySlice, value: &[u8]) {
-        unimplemented!()
+        let has_space = self.builder.add(key, value);
+        let vec_key: Vec<u8> = key.raw_ref().to_vec();
+        if vec_key > self.last_key || self.last_key.len() == 0 {
+            self.last_key = vec_key;
+        }
+        let vec_key: Vec<u8> = key.raw_ref().to_vec();
+        if vec_key < self.first_key || self.first_key.len() == 0 {
+            self.first_key = vec_key;
+        }
+
+        if !has_space {
+            let offset = self.data.len();
+            let full = replace(&mut self.builder, BlockBuilder::new(self.block_size));
+            let first_key = replace(&mut self.first_key, Vec::<u8>::new());
+            let last_key = replace(&mut self.last_key, Vec::<u8>::new());
+            let full_block = full.build();
+            self.data.extend(full_block.encode());
+            self.meta.push(BlockMeta {
+                offset,
+                first_key: Key::from_vec(first_key).into_key_bytes(),
+                last_key: Key::from_vec(last_key).into_key_bytes(),
+            });
+        }
     }
 
-    /// Get the estimated size of the SSTable.
-    ///
-    /// Since the data blocks contain much more data than meta blocks, just return the size of data
-    /// blocks here.
     pub fn estimated_size(&self) -> usize {
-        unimplemented!()
+        self.data.len()
     }
 
     /// Builds the SSTable and writes it to the given path. Use the `FileObject` structure to manipulate the disk objects.
@@ -62,7 +91,40 @@ impl SsTableBuilder {
         block_cache: Option<Arc<BlockCache>>,
         path: impl AsRef<Path>,
     ) -> Result<SsTable> {
-        unimplemented!()
+        let len = self.data.len();
+        let meta_ref = self.meta.clone();
+        let first_key = match meta_ref
+            .iter()
+            .map(|x| &x.first_key)
+            .reduce(|first, second| std::cmp::min(first, second))
+        {
+            Some(v) => v,
+            None => &Key::new().into_key_bytes(),
+        };
+        let last_key = match meta_ref
+            .iter()
+            .map(|x| &x.last_key)
+            .reduce(|first, second| std::cmp::max(first, second))
+        {
+            Some(v) => v,
+            None => &Key::new().into_key_bytes(),
+        };
+        let mut payload = self.data;
+        BlockMeta::encode_block_meta(&self.meta, &mut payload);
+        let block_meta_offset: Vec<u8> = (len as u32).to_ne_bytes().to_vec();
+        payload.extend(block_meta_offset);
+        let f = FileObject::create(path.as_ref(), payload);
+        Ok(SsTable {
+            file: f?,
+            id,
+            block_meta: self.meta,
+            block_meta_offset: len,
+            block_cache: None,
+            bloom: None,
+            first_key: first_key.clone(),
+            last_key: last_key.clone(),
+            max_ts: 0,
+        })
     }
 
     #[cfg(test)]

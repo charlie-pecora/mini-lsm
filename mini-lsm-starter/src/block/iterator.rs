@@ -73,7 +73,7 @@ impl BlockIterator {
     /// Returns true if the iterator is valid.
     /// Note: You may want to make use of `key`
     pub fn is_valid(&self) -> bool {
-        self.key().is_empty()
+        !self.key().is_empty()
     }
 
     /// Seeks to the first key in the block.
@@ -119,10 +119,6 @@ impl BlockIterator {
     pub fn seek_to_key(&mut self, key: KeySlice) {
         self.seek_to_first();
         while self.key() < key && !self.key().is_empty() {
-            println!(
-                "{:?}",
-                String::from_utf8(self.key().to_key_vec().into_inner())
-            );
             self.next()
         }
     }
