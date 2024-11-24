@@ -44,7 +44,7 @@ impl SsTableBuilder {
             builder: BlockBuilder::new(block_size),
             first_key: Vec::<u8>::new(),
             last_key: Vec::<u8>::new(),
-            data: Vec::<u8>::new(),
+            data: Vec::<u8>::with_capacity(block_size),
             meta: Vec::<BlockMeta>::new(),
             block_size,
         }
@@ -66,10 +66,16 @@ impl SsTableBuilder {
         }
 
         if !has_space {
-            let offset = self.data.len();
-            let full = replace(&mut self.builder, BlockBuilder::new(self.block_size));
-            let first_key = replace(&mut self.first_key, Vec::<u8>::new());
-            let last_key = replace(&mut self.last_key, Vec::<u8>::new());
+            self.serialize_builder();
+        }
+    }
+
+    fn serialize_builder(&mut self) {
+        let offset = self.data.len();
+        let full = replace(&mut self.builder, BlockBuilder::new(self.block_size));
+        let first_key = replace(&mut self.first_key, Vec::<u8>::new());
+        let last_key = replace(&mut self.last_key, Vec::<u8>::new());
+        if first_key.len() != 0 && last_key.len() != 0 {
             let full_block = full.build();
             self.data.extend(full_block.encode());
             self.meta.push(BlockMeta {
@@ -80,10 +86,6 @@ impl SsTableBuilder {
         }
     }
 
-    pub fn estimated_size(&self) -> usize {
-        self.data.len()
-    }
-
     /// Builds the SSTable and writes it to the given path. Use the `FileObject` structure to manipulate the disk objects.
     pub fn build(
         mut self,
@@ -91,6 +93,7 @@ impl SsTableBuilder {
         block_cache: Option<Arc<BlockCache>>,
         path: impl AsRef<Path>,
     ) -> Result<SsTable> {
+        self.serialize_builder();
         let len = self.data.len();
         let meta_ref = self.meta.clone();
         let first_key = match meta_ref

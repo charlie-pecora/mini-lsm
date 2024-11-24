@@ -151,6 +151,13 @@ where
 {
     for (k, v) in expected {
         assert!(iter.is_valid());
+        println!(
+            "expected {:?} {:?} actual {:?} {:?}",
+            k,
+            v,
+            as_bytes(iter.key()),
+            as_bytes(iter.value()),
+        );
         assert_eq!(
             k,
             iter.key(),
@@ -166,6 +173,13 @@ where
             as_bytes(iter.value()),
         );
         iter.next().unwrap();
+        println!(
+            "after iter expected {:?} {:?} actual {:?} {:?}",
+            k,
+            v,
+            as_bytes(iter.key()),
+            as_bytes(iter.value()),
+        );
     }
     assert!(!iter.is_valid());
 }

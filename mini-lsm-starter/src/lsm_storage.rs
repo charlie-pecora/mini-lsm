@@ -16,7 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
-use std::ops::Bound;
+use std::ops::{Bound, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -31,11 +31,14 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
+use crate::iterators::StorageIterator;
+use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
-use crate::table::SsTable;
+use crate::table::{SsTable, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -304,15 +307,17 @@ impl LsmStorageInner {
         match memtable_value {
             Some(v) => Ok(check_tombstone(v)),
             None => {
+                let mut res = None;
                 for mt in s.imm_memtables.iter() {
                     match mt.get(_key) {
                         Some(v) => {
-                            return Ok(check_tombstone(v));
+                            res = check_tombstone(v);
+                            return Ok(res);
                         }
                         None => continue,
                     }
                 }
-                Ok(None)
+                Ok(res)
             }
         }
     }
@@ -411,18 +416,57 @@ impl LsmStorageInner {
         _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
         let state = self.state.read();
-        let mut iter = vec![Box::new(state.memtable.scan(_lower, _upper))];
-        for imm in state.imm_memtables.iter() {
-            iter.push(Box::new(imm.scan(_lower, _upper)));
+        let mut memtable_iters = vec![Box::new(state.memtable.scan(_lower, _upper))];
+        for mt in state.imm_memtables.iter() {
+            memtable_iters.push(Box::new(mt.scan(_lower, _upper)));
         }
-        let merged = MergeIterator::create(iter);
-        Ok(FusedIterator::new(LsmIterator::new(merged)?))
+        let mut sstable_iters = Vec::with_capacity(state.sstables.len());
+        for table_idx in state.l0_sstables.iter() {
+            let i = match _lower {
+                Bound::Unbounded => SsTableIterator::create_and_seek_to_first(
+                    state
+                        .sstables
+                        .get(table_idx)
+                        .expect("Should never fail to get table by index")
+                        .clone(),
+                )?,
+                Bound::Included(v) => SsTableIterator::create_and_seek_to_key(
+                    state
+                        .sstables
+                        .get(table_idx)
+                        .expect("Should never fail to get table by index")
+                        .clone(),
+                    KeySlice::from_slice(v),
+                )?,
+                Bound::Excluded(v) => {
+                    let mut t = SsTableIterator::create_and_seek_to_key(
+                        state
+                            .sstables
+                            .get(table_idx)
+                            .expect("Should never fail to get table by index")
+                            .clone(),
+                        KeySlice::from_slice(v),
+                    )?;
+                    if t.key() == KeySlice::from_slice(v) {
+                        let _ = t.next();
+                    }
+                    t
+                }
+            };
+            sstable_iters.push(Box::new(i))
+        }
+        Ok(FusedIterator::new(LsmIterator::new(
+            TwoMergeIterator::create(
+                MergeIterator::create(memtable_iters),
+                MergeIterator::create(sstable_iters),
+            )?,
+        )?))
     }
 }
 
 // empty byte array is used as the tombstone, so return None if this value is found
 fn check_tombstone(v: Bytes) -> Option<Bytes> {
-    if v.is_empty() {
+    if v.len() == 0 {
         return None;
     }
     Some(v)

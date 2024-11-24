@@ -20,12 +20,16 @@ use std::fmt;
 use anyhow::{Error, Result};
 
 use crate::{
-    iterators::{StorageIterator, merge_iterator::MergeIterator},
+    iterators::{
+        merge_iterator::MergeIterator, two_merge_iterator::TwoMergeIterator, StorageIterator,
+    },
     mem_table::MemTableIterator,
+    table::SsTableIterator,
 };
 
-/// Represents the internal type for an LSM iterator. This type will be changed across the course for multiple times.
-type LsmIteratorInner = MergeIterator<MemTableIterator>;
+/// Represents the internal type for an LSM iterator. This type will be changed across the tutorial for multiple times.
+type LsmIteratorInner =
+    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>;
 
 pub struct LsmIterator {
     inner: LsmIteratorInner,
@@ -63,7 +67,7 @@ impl StorageIterator for LsmIterator {
     fn next(&mut self) -> Result<()> {
         self.inner.next()?;
         // skip deleted keys
-        if self.key_is_deleted() {
+        while self.key_is_deleted() {
             self.next()?
         }
         Ok(())
