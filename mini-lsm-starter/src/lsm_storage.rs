@@ -36,7 +36,7 @@ use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
-use crate::mem_table::MemTable;
+use crate::mem_table::{MemTable, MemTableIterator};
 use crate::mvcc::LsmMvccInner;
 use crate::table::{SsTable, SsTableIterator};
 
@@ -300,25 +300,39 @@ impl LsmStorageInner {
         compaction_filters.push(compaction_filter);
     }
 
+    fn get_from_imm(&self, _key: &[u8]) -> Option<Bytes> {
+        let s = self.state.read();
+        for mt in s.imm_memtables.iter() {
+            match mt.get(_key) {
+                Some(v) => return Some(v),
+                None => continue,
+            }
+        }
+        None
+    }
+
+    fn get_from_memtable(&self, _key: &[u8]) -> Option<Bytes> {
+        let s = self.state.read();
+        s.memtable.get(_key)
+    }
+
+    fn get_from_sstables(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+        let iter = self.scan_sstables(Bound::Included(_key), Bound::Unbounded)?;
+        if iter.key() == KeySlice::from_slice(_key) {
+            return Ok(check_tombstone(Bytes::copy_from_slice(iter.value())));
+        }
+        Ok(None)
+    }
+
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
-        let s = self.state.read();
-        let memtable_value = s.memtable.get(_key);
+        let memtable_value = self.get_from_memtable(_key);
         match memtable_value {
-            Some(v) => Ok(check_tombstone(v)),
-            None => {
-                let mut res = None;
-                for mt in s.imm_memtables.iter() {
-                    match mt.get(_key) {
-                        Some(v) => {
-                            res = check_tombstone(v);
-                            return Ok(res);
-                        }
-                        None => continue,
-                    }
-                }
-                Ok(res)
-            }
+            Some(v) => return Ok(check_tombstone(v)),
+            None => match self.get_from_imm(_key) {
+                Some(v) => return Ok(check_tombstone(v)),
+                None => return self.get_from_sstables(_key),
+            },
         }
     }
 
@@ -409,17 +423,25 @@ impl LsmStorageInner {
         Ok(())
     }
 
-    /// Create an iterator over a range of keys.
-    pub fn scan(
+    fn scan_memtables(
         &self,
         _lower: Bound<&[u8]>,
         _upper: Bound<&[u8]>,
-    ) -> Result<FusedIterator<LsmIterator>> {
+    ) -> Result<MergeIterator<MemTableIterator>> {
         let state = self.state.read();
         let mut memtable_iters = vec![Box::new(state.memtable.scan(_lower, _upper))];
         for mt in state.imm_memtables.iter() {
             memtable_iters.push(Box::new(mt.scan(_lower, _upper)));
         }
+        Ok(MergeIterator::create(memtable_iters))
+    }
+
+    fn scan_sstables(
+        &self,
+        _lower: Bound<&[u8]>,
+        _upper: Bound<&[u8]>,
+    ) -> Result<MergeIterator<SsTableIterator>> {
+        let state = self.state.read();
         let mut sstable_iters = Vec::with_capacity(state.sstables.len());
         for table_idx in state.l0_sstables.iter() {
             let i = match _lower {
@@ -455,10 +477,19 @@ impl LsmStorageInner {
             };
             sstable_iters.push(Box::new(i))
         }
+        Ok(MergeIterator::create(sstable_iters))
+    }
+
+    /// Create an iterator over a range of keys.
+    pub fn scan(
+        &self,
+        _lower: Bound<&[u8]>,
+        _upper: Bound<&[u8]>,
+    ) -> Result<FusedIterator<LsmIterator>> {
         Ok(FusedIterator::new(LsmIterator::new(
             TwoMergeIterator::create(
-                MergeIterator::create(memtable_iters),
-                MergeIterator::create(sstable_iters),
+                self.scan_memtables(_lower, _upper)?,
+                self.scan_sstables(_lower, _upper)?,
             )?,
         )?))
     }
