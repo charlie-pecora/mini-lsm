@@ -16,6 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
+use std::fs::{create_dir, create_dir_all};
 use std::ops::{Bound, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,7 +39,7 @@ use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::{MemTable, MemTableIterator};
 use crate::mvcc::LsmMvccInner;
-use crate::table::{SsTable, SsTableIterator};
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -260,6 +261,9 @@ impl LsmStorageInner {
     /// not exist.
     pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
         let path = path.as_ref();
+        if !path.exists() {
+            let _ = create_dir_all(path);
+        }
         let state = LsmStorageState::create(&options);
 
         let compaction_controller = match &options.compaction_options {
@@ -415,7 +419,35 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        unimplemented!()
+        println!("flushing memtable");
+        let _lock = self.state_lock.lock();
+        let mut _memtable = None;
+        // clone the memtable and release the read lock
+        if let Some(most_recent_memtable_snapshot) = self.state.read().imm_memtables.last() {
+            _memtable = Some(most_recent_memtable_snapshot.clone());
+        }
+        if let Some(memtable) = _memtable {
+            let mut builder = SsTableBuilder::new(self.options.block_size);
+            memtable.flush(&mut builder)?;
+            let sst_id = memtable.id();
+            let _sstable = builder.build(
+                sst_id,
+                Some(self.block_cache.clone()),
+                self.path_of_sst(sst_id),
+            )?;
+            let sstable = Arc::new(_sstable);
+            // Now that everything is built, get a write lock and update
+            let mut guard = self.state.write();
+            let mut current = guard.as_ref().clone();
+            // remove last imm memtable
+            let _ = current.imm_memtables.pop();
+            // add to sstables
+            current.l0_sstables.insert(0, sstable.sst_id());
+            current.sstables.insert(sstable.sst_id(), sstable.clone());
+            *guard = Arc::new(current);
+            drop(guard);
+        }
+        Ok(())
     }
 
     pub fn new_txn(&self) -> Result<()> {

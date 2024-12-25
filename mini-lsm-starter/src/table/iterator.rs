@@ -32,7 +32,6 @@ pub struct SsTableIterator {
 impl SsTableIterator {
     /// Create a new iterator and seek to the first key-value pair in the first data block.
     pub fn create_and_seek_to_first(table: Arc<SsTable>) -> Result<Self> {
-        println!("{:?} {:?}", table.id, table.block_meta);
         let block = table.read_block_cached(0)?;
         let block_iter = BlockIterator::create_and_seek_to_first(block);
         Ok(Self {
@@ -61,11 +60,8 @@ impl SsTableIterator {
     /// Note: You probably want to review the handout for detailed explanation when implementing
     /// this function.
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
-        println!("{:?}", String::from_utf8(key.to_key_vec().into_inner()));
         for (i, meta) in self.table.block_meta.iter().enumerate() {
-            println!("{:?} {:?}", meta.first_key, meta.last_key);
             if key >= meta.first_key.as_key_slice() && key <= meta.last_key.as_key_slice() {
-                println!("found match!");
                 let block = self.table.read_block_cached(i)?;
                 self.blk_iter = BlockIterator::create_and_seek_to_key(block, key);
                 self.blk_idx = i;

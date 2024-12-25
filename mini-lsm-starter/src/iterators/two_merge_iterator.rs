@@ -83,7 +83,6 @@ impl<
         } else {
             self.first = false;
         }
-        println!("{}", self.first);
         Ok(())
     }
 }
