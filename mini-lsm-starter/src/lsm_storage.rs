@@ -174,7 +174,17 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
-        unimplemented!()
+        self.flush_notifier.send(()).ok();
+        self.compaction_notifier.send(()).ok();
+        let ft = self.flush_thread.lock().take();
+        if let Some(t) = ft {
+            let _ = t.join();
+        }
+        let ct = self.compaction_thread.lock().take();
+        if let Some(t) = ct {
+            let _ = t.join();
+        }
+        Ok(())
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -419,7 +429,6 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        println!("flushing memtable");
         let _lock = self.state_lock.lock();
         let mut _memtable = None;
         // clone the memtable and release the read lock
@@ -465,6 +474,7 @@ impl LsmStorageInner {
         for mt in state.imm_memtables.iter() {
             memtable_iters.push(Box::new(mt.scan(_lower, _upper)));
         }
+        println!("{} memtables", memtable_iters.len());
         Ok(MergeIterator::create(memtable_iters))
     }
 

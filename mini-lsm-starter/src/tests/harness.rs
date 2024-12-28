@@ -150,7 +150,6 @@ where
     I: for<'a> StorageIterator<KeyType<'a> = &'a [u8]>,
 {
     for (k, v) in expected {
-        println!("{:?} {:?}", k, v);
         assert!(iter.is_valid());
         assert_eq!(
             k,
@@ -168,7 +167,6 @@ where
         );
         iter.next().unwrap();
     }
-    println!("{:?} {:?}", iter.key(), iter.value());
     assert!(!iter.is_valid());
 }
 

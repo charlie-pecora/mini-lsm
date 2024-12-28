@@ -202,4 +202,8 @@ impl StorageIterator for MemTableIterator {
         self.with_mut(|x| *x.item = entry);
         Ok(())
     }
+
+    fn num_active_iterators(&self) -> usize {
+        1
+    }
 }
