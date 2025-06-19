@@ -21,7 +21,7 @@ use anyhow::{Error, Result};
 
 use crate::{
     iterators::{
-        merge_iterator::MergeIterator, two_merge_iterator::TwoMergeIterator, StorageIterator,
+        StorageIterator, merge_iterator::MergeIterator, two_merge_iterator::TwoMergeIterator,
     },
     mem_table::MemTableIterator,
     table::SsTableIterator,
