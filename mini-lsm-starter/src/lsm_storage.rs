@@ -331,9 +331,25 @@ impl LsmStorageInner {
     }
 
     fn get_from_sstables(&self, _key: &[u8]) -> Result<Option<Bytes>> {
-        let iter = self.scan_sstables(Bound::Included(_key), Bound::Unbounded)?;
-        if iter.key() == KeySlice::from_slice(_key) {
-            return Ok(check_tombstone(Bytes::copy_from_slice(iter.value())));
+        let state = self.state.read();
+        for table_idx in state.l0_sstables.iter() {
+            let sstable = state
+                .sstables
+                .get(table_idx)
+                .expect("Should never fail to get table by index")
+                .clone();
+            let should_fetch_from_sstable = match &sstable.bloom {
+                Some(b) => b.may_contain(farmhash::fingerprint32(_key)),
+                None => true,
+            };
+            if should_fetch_from_sstable {
+                let key = KeySlice::from_slice(_key);
+                let iter = SsTableIterator::create_and_seek_to_key(sstable.clone(), key)
+                    .expect("Should be able to iterate over a table");
+                if iter.key() == key {
+                    return Ok(check_tombstone(Bytes::copy_from_slice(iter.value())));
+                }
+            }
         }
         Ok(None)
     }

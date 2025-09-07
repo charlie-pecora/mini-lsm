@@ -140,11 +140,35 @@ impl SsTable {
 
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
-        let extra = file.read(file.size() - 4, 4)?;
+        let mut end_of_file_size = file.size();
+        println!("end_of_file_size {end_of_file_size}");
+        let bloom_offset_bytes = file.read(end_of_file_size - 4, 4)?;
+        // ugly hack to make a 4 byte array...
+        let bloom_offset = u32::from_ne_bytes([
+            bloom_offset_bytes[0],
+            bloom_offset_bytes[1],
+            bloom_offset_bytes[2],
+            bloom_offset_bytes[3],
+        ]) as u64;
+        println!("bloom offset {bloom_offset}");
+        let bloom =
+            match Bloom::decode(&file.read(bloom_offset, end_of_file_size - 4 - bloom_offset)?) {
+                Ok(b) => {
+                    end_of_file_size = bloom_offset;
+                    Some(b)
+                }
+                Err(e) => {
+                    println!("Error decoding bloom filter: {e}");
+                    None
+                }
+            };
+
+        let extra = file.read(end_of_file_size - 4, 4)?;
         // ugly hack to make a 4 byte array...
         let meta_offset = u32::from_ne_bytes([extra[0], extra[1], extra[2], extra[3]]) as u64;
+        println!("meta offset {meta_offset}");
         let meta = BlockMeta::decode_block_meta(Bytes::from(
-            file.read(meta_offset, file.size() - 4 - meta_offset)?,
+            file.read(meta_offset, end_of_file_size - 4 - meta_offset)?,
         ));
         let meta_ref = meta.clone();
         let first_key = match meta_ref
@@ -170,7 +194,7 @@ impl SsTable {
             block_meta: meta,
             block_meta_offset: meta_offset.try_into()?,
             block_cache: Some(Arc::new(BlockCache::new(10))),
-            bloom: None,
+            bloom,
             first_key: first_key.clone(),
             last_key: last_key.clone(),
             max_ts: 0,
