@@ -84,15 +84,41 @@ impl BlockIterator {
     }
 
     fn set_key_value_from_offset(&mut self, offset: usize) {
-        // get first two bytes from block
-        let key_len =
-            u16::from_ne_bytes([self.block.data[offset], self.block.data[offset + 1]]) as usize;
-        self.key = Key::from_slice(&self.block.data[offset + 2..offset + 2 + key_len]).to_key_vec();
-        let bytes_len = u16::from_ne_bytes([
-            self.block.data[offset + 2 + key_len],
-            self.block.data[offset + 2 + key_len + 1],
-        ]) as usize;
-        self.value_range = (offset + 4 + key_len, offset + 4 + key_len + bytes_len);
+        if offset == 0 {
+            // get first two bytes from block
+            let key_len =
+                u16::from_ne_bytes([self.block.data[offset], self.block.data[offset + 1]]) as usize;
+            self.key =
+                Key::from_slice(&self.block.data[offset + 2..offset + 2 + key_len]).to_key_vec();
+            let bytes_len = u16::from_ne_bytes([
+                self.block.data[offset + 2 + key_len],
+                self.block.data[offset + 2 + key_len + 1],
+            ]) as usize;
+            self.value_range = (offset + 4 + key_len, offset + 4 + key_len + bytes_len);
+        } else {
+            // first two bytes are overlap len
+            let overlap_len =
+                u16::from_ne_bytes([self.block.data[offset], self.block.data[offset + 1]]) as usize;
+            let remaining_key_len =
+                u16::from_ne_bytes([self.block.data[offset + 2], self.block.data[offset + 3]])
+                    as usize;
+            self.key = Key::from_slice(
+                &[
+                    &self.first_key.as_key_slice().into_inner()[..overlap_len],
+                    &self.block.data[offset + 4..offset + 4 + remaining_key_len],
+                ]
+                .concat(),
+            )
+            .to_key_vec();
+            let bytes_len = u16::from_ne_bytes([
+                self.block.data[offset + 4 + remaining_key_len],
+                self.block.data[offset + 4 + remaining_key_len + 1],
+            ]) as usize;
+            self.value_range = (
+                offset + 6 + remaining_key_len,
+                offset + 6 + remaining_key_len + bytes_len,
+            );
+        }
     }
 
     /// Move to the next key in the block.

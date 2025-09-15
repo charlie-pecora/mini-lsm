@@ -47,10 +47,28 @@ impl BlockBuilder {
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         let mut serialized_data = Vec::<u8>::new();
-        let key_len: u16 = key.len().try_into().unwrap();
+        if self.is_empty() {
+            self.first_key = key.to_key_vec();
+            let key_len: u16 = key.len().try_into().unwrap();
+            serialized_data.extend_from_slice(&key_len.to_ne_bytes());
+            serialized_data.extend_from_slice(key.raw_ref());
+        } else {
+            let key_bytes = key.into_inner();
+            let key_len: u16 = key_bytes.len().try_into().unwrap();
+            let mut overlap_len: u16 = 0;
+            for i in 0..self.first_key.len() {
+                if i >= key_len as usize
+                    || self.first_key.as_key_slice().into_inner()[i] != key_bytes[i]
+                {
+                    break;
+                }
+                overlap_len += 1;
+            }
+            serialized_data.extend_from_slice(&overlap_len.to_ne_bytes());
+            serialized_data.extend_from_slice(&(key_len - overlap_len).to_ne_bytes());
+            serialized_data.extend_from_slice(&key_bytes[overlap_len as usize..]);
+        }
         let value_len: u16 = value.len().try_into().unwrap();
-        serialized_data.extend_from_slice(&key_len.to_ne_bytes());
-        serialized_data.extend_from_slice(key.raw_ref());
         serialized_data.extend_from_slice(&value_len.to_ne_bytes());
         serialized_data.extend_from_slice(value);
         self.offsets.push(self.data.len().try_into().unwrap());
@@ -64,7 +82,7 @@ impl BlockBuilder {
 
     /// Check if there is no key-value pair in the block.
     pub fn is_empty(&self) -> bool {
-        unimplemented!()
+        self.offsets.len() == 0
     }
 
     /// Finalize the block.
