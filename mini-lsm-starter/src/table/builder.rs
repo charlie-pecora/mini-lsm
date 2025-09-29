@@ -141,6 +141,10 @@ impl SsTableBuilder {
         })
     }
 
+    pub fn estimated_size(&self) -> usize {
+        self.data.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn build_for_test(self, path: impl AsRef<Path>) -> Result<SsTable> {
         self.build(0, None, path)
