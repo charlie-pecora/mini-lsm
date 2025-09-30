@@ -32,6 +32,7 @@ pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredComp
 
 use crate::block::BlockBuilder;
 use crate::iterators::StorageIterator;
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
@@ -145,14 +146,12 @@ impl LsmStorageInner {
                 let mut l1_ssts_to_compact = vec![];
                 for table_id in l1_sstables.clone() {
                     if let Some(t) = snapshot.sstables.get(&table_id) {
-                        l1_ssts_to_compact.push(Box::new(
-                            SsTableIterator::create_and_seek_to_first(t.clone())?,
-                        ));
+                        l1_ssts_to_compact.push(t.clone());
                     }
                 }
                 let mut iter = TwoMergeIterator::create(
                     MergeIterator::create(l0_ssts_to_compact),
-                    MergeIterator::create(l1_ssts_to_compact),
+                    SstConcatIterator::create_and_seek_to_first(l1_ssts_to_compact)?,
                 )?;
                 let mut sstable_builder = SsTableBuilder::new(self.options.block_size);
                 let mut new_ssts = vec![];

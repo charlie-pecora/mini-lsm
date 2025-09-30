@@ -32,6 +32,7 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::StorageIterator;
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
@@ -331,6 +332,7 @@ impl LsmStorageInner {
     }
 
     fn get_from_sstables(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+        let key = KeySlice::from_slice(_key);
         let state = self.state.read();
         for table_idx in state.l0_sstables.iter() {
             let sstable = state
@@ -343,13 +345,16 @@ impl LsmStorageInner {
                 None => true,
             };
             if should_fetch_from_sstable {
-                let key = KeySlice::from_slice(_key);
                 let iter = SsTableIterator::create_and_seek_to_key(sstable.clone(), key)
                     .expect("Should be able to iterate over a table");
                 if iter.key() == key {
                     return Ok(check_tombstone(Bytes::copy_from_slice(iter.value())));
                 }
             }
+        }
+        let levels_iter = self.scan_levels(Bound::Included(_key), Bound::Unbounded)?;
+        if levels_iter.is_valid() && levels_iter.key() == key {
+            return Ok(check_tombstone(Bytes::copy_from_slice(levels_iter.value())));
         }
         Ok(None)
     }
@@ -538,6 +543,33 @@ impl LsmStorageInner {
         Ok(MergeIterator::create(sstable_iters))
     }
 
+    fn scan_levels(&self, _lower: Bound<&[u8]>, _upper: Bound<&[u8]>) -> Result<SstConcatIterator> {
+        let state = self.state.read();
+        let mut sstables = vec![];
+        for (_, level_table_ids) in &state.levels {
+            for table_id in level_table_ids {
+                if let Some(table) = state.sstables.get(table_id) {
+                    sstables.push(table.clone());
+                };
+            }
+        }
+        let i = match _lower {
+            Bound::Unbounded => SstConcatIterator::create_and_seek_to_first(sstables)?,
+            Bound::Included(v) => {
+                SstConcatIterator::create_and_seek_to_key(sstables, KeySlice::from_slice(v))?
+            }
+            Bound::Excluded(v) => {
+                let mut t =
+                    SstConcatIterator::create_and_seek_to_key(sstables, KeySlice::from_slice(v))?;
+                if t.key() == KeySlice::from_slice(v) {
+                    let _ = t.next();
+                }
+                t
+            }
+        };
+        Ok(i)
+    }
+
     /// Create an iterator over a range of keys.
     pub fn scan(
         &self,
@@ -546,8 +578,11 @@ impl LsmStorageInner {
     ) -> Result<FusedIterator<LsmIterator>> {
         Ok(FusedIterator::new(LsmIterator::new(
             TwoMergeIterator::create(
-                self.scan_memtables(_lower, _upper)?,
-                self.scan_sstables(_lower, _upper)?,
+                TwoMergeIterator::create(
+                    self.scan_memtables(_lower, _upper)?,
+                    self.scan_sstables(_lower, _upper)?,
+                )?,
+                self.scan_levels(_lower, _upper)?,
             )?,
         )?))
     }
